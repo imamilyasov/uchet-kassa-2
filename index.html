@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Базар Учёт 🛒</title>
+    <style>
+        * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body { background: #f4f6f8; margin: 0; padding: 15px; color: #333; max-width: 600px; margin: auto; }
+        .card { background: white; padding: 18px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        h2 { margin-top: 0; font-size: 1.2rem; color: #27ae60; }
+        label { display: block; font-size: 0.85rem; font-weight: 600; margin: 10px 0 4px; color: #555; }
+        input, textarea { width: 100%; padding: 10px; border: 1px solid #ccc; border-radius: 8px; font-size: 1rem; margin-bottom: 8px; }
+        button { border: none; border-radius: 8px; padding: 12px; font-size: 1rem; font-weight: bold; cursor: pointer; color: white; }
+        .btn-green { background: #27ae60; width: 100%; }
+        .btn-blue { background: #2980b9; padding: 6px 10px; font-size: 0.8rem; }
+        .btn-red { background: #e74c3c; padding: 6px 10px; font-size: 0.8rem; }
+        .expense-row { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; }
+        .expense-row input { margin-bottom: 0; }
+        .del-row-btn { background: #e74c3c; padding: 10px 12px; }
+        .report-item { background: #f9f9f9; padding: 12px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #27ae60; }
+        .report-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .actions { display: flex; gap: 6px; }
+        #auth-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f4f6f8; display: flex; justify-content: center; align-items: center; z-index: 1000; }
+        #auth-card { background: white; padding: 25px; border-radius: 12px; width: 90%; max-width: 350px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); text-align: center; }
+    </style>
+    <link rel="manifest" href="/manifest.json">
+</head>
+<body>
+
+    <!-- Экран авторизации (пароль для друга) -->
+    <div id="auth-screen">
+        <div id="auth-card">
+            <h2>🔒 Вход в систему</h2>
+            <p style="font-size: 0.9rem; color: #666;">Введите секретный пароль:</p>
+            <input type="password" id="app_password" placeholder="Пароль">
+            <button class="btn-green" onclick="checkPassword()">Войти</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>📝 Учёт за день (Добавить / Обновить)</h2>
+        <form id="reportForm">
+            <label>Дата отчёта:</label>
+            <input type="date" id="report_date" required>
+
+            <label>Закупка товаров (Расходы):</label>
+            <div id="expensesList"></div>
+            <button type="button" onclick="addExpenseRow()" style="background: #34495e; margin-bottom: 15px; width: 100%;">+ Добавить товар</button>
+
+            <label>Общая выручка за день (Деньги в кассе):</label>
+            <input type="number" step="0.1" id="total_revenue" placeholder="0.00" required>
+
+            <label>Заметки / Примечания:</label>
+            <textarea id="notes" placeholder="Напр: Хороший день, много покупателей"></textarea>
+
+            <button type="submit" class="btn-green">💾 Сохранить / Обновить отчёт</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>📊 История отчётов</h2>
+        <div id="history">Загрузка...</div>
+    </div>
+
+    <script>
+        // Проверка пароля (можешь поменять 'bazar2026' на свой пароль)
+        const SECRET_PASSWORD = 'bazar2026';
+
+        function checkPassword() {
+            const pass = document.getElementById('app_password').value;
+            if (pass === SECRET_PASSWORD) {
+                document.getElementById('auth-screen').style.display = 'none';
+                localStorage.setItem('bazar_auth', 'true');
+                loadReports();
+            } else {
+                alert('Неверный пароль!');
+            }
+        }
+
+        // Если уже входил ранее на этом устройстве
+        window.onload = function() {
+            if (localStorage.getItem('bazar_auth') === 'true') {
+                document.getElementById('auth-screen').style.display = 'none';
+                loadReports();
+            }
+        };
+
+        document.getElementById('report_date').valueAsDate = new Date();
+        let allReports = [];
+
+        function addExpenseRow(name = '', qty = '', price = '') {
+            const container = document.getElementById('expensesList');
+            const row = document.createElement('div');
+            row.className = 'expense-row';
+            row.innerHTML = `
+                <input type="text" placeholder="Товар" value="${name}" class="p-name" required style="flex: 2;">
+                <input type="number" step="0.1" placeholder="Кг" value="${qty}" class="p-qty" required style="flex: 1;">
+                <input type="number" step="0.1" placeholder="Цена" value="${price}" class="p-price" required style="flex: 1;">
+                <button type="button" class="del-row-btn" onclick="this.parentElement.remove()">✕</button>
+            `;
+            container.appendChild(row);
+        }
+
+        addExpenseRow();
+
+        async function loadReports() {
+            try {
+                const res = await fetch('/reports/');
+                allReports = await res.json();
+                // Сохраняем в localStorage для оффлайн-доступа
+                localStorage.setItem('cached_reports', JSON.stringify(allReports));
+            } catch (err) {
+                // Если нет интернета, берем из памяти телефона
+                console.log('Нет сети, загружаем из кэша');
+                const cached = localStorage.getItem('cached_reports');
+                if (cached) {
+                    allReports = JSON.parse(cached);
+                } else {
+                    document.getElementById('history').innerHTML = '<p>Нет интернета и нет сохраненных данных</p>';
+                    return;
+                }
+            }
+                
+            const historyDiv = document.getElementById('history');
+            if (allReports.length === 0) {
+                historyDiv.innerHTML = '<p>Пока нет сохраненных отчетов</p>';
+                return;
+            }
+
+            historyDiv.innerHTML = [...allReports].reverse().map(rep => `
+                <div class="report-item">
+                    <div class="report-header">
+                        <b>📅 ${rep.date}</b>
+                        <div class="actions">
+                            <button class="btn-blue" onclick="editReport('${rep.date}')">✏️ Изменить</button>
+                            <button class="btn-red" onclick="deleteReport('${rep.date}')">🗑️ Удалить</button>
+                        </div>
+                    </div>
+                    <div>Выручка: <b>${rep.total_revenue}</b> | Затраты: <b>${rep.total_spent}</b></div>
+                    <div style="color: ${rep.net_profit >= 0 ? '#27ae60' : '#e74c3c'}; font-weight: bold;">
+                        Прибыль: ${rep.net_profit}
+                    </div>
+                    ${rep.notes ? `<small style="color: #666;">Заметки: ${rep.notes}</small>` : ''}
+                </div>
+            `).join('');
+        }
+
+        window.editReport = function(dateStr) {
+            const rep = allReports.find(r => r.date === dateStr);
+            if (!rep) return;
+
+            document.getElementById('report_date').value = rep.date;
+            document.getElementById('total_revenue').value = rep.total_revenue;
+            document.getElementById('notes').value = rep.notes || '';
+
+            const container = document.getElementById('expensesList');
+            container.innerHTML = '';
+            
+            if (rep.expenses && rep.expenses.length > 0) {
+                rep.expenses.forEach(ex => {
+                    addExpenseRow(ex.product_name, ex.quantity_kg, ex.buy_price);
+                });
+            } else {
+                addExpenseRow();
+            }
+
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        window.deleteReport = async function(dateStr) {
+            if (!confirm(`Точно удалить отчет за ${dateStr}?`)) return;
+
+            try {
+                await fetch(`/reports/${dateStr}`, { method: 'DELETE' });
+                loadReports();
+            } catch (err) {
+                alert('Ошибка: нет интернета для удаления отчета.');
+            }
+        }
+
+        document.getElementById('reportForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+
+            const rows = document.querySelectorAll('.expense-row');
+            const expenses = [];
+            rows.forEach(row => {
+                const name = row.querySelector('.p-name').value.trim();
+                const qty = parseFloat(row.querySelector('.p-qty').value) || 0;
+                const price = parseFloat(row.querySelector('.p-price').value) || 0;
+                if (name) {
+                    expenses.push({ product_name: name, quantity_kg: qty, buy_price: price });
+                }
+            });
+
+            const payload = {
+                report_date: document.getElementById('report_date').value,
+                expenses: expenses,
+                total_revenue: parseFloat(document.getElementById('total_revenue').value) || 0,
+                notes: document.getElementById('notes').value
+            };
+
+            try {
+                await fetch('/reports/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                loadReports();
+                alert('Отчёт успешно сохранен/обновлен!');
+                document.getElementById('reportForm').reset();
+                document.getElementById('report_date').valueAsDate = new Date();
+                const container = document.getElementById('expensesList');
+                container.innerHTML = '';
+                addExpenseRow();
+            } catch (err) {
+                alert('Не удалось отправить: проверьте подключение к интернету.');
+            }
+        });
+
+        // Регистрация Service Worker для оффлайн работы
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
+        }
+    </script>
+</body>
+</html>
